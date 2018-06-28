@@ -1,0 +1,123 @@
+heat_template_version: 2015-10-15
+
+description: >
+  This is a very simple template that illustrates automatic scaling up and down
+  using OS::Heat::AutoScalingGroup. CPU load is generated for
+  15 mins after each instance is spawned, triggering a scale-up event.
+  Once the max number of instances has been reached and the CPU
+  load generation has finished, the number of instances will be scaled
+  back down to 1.
+
+parameters:
+  key:
+    type: string
+    label: Key Name
+    description: Name of key-pair to be used for compute instance
+    default: "opstkcsi"
+  image:
+    type: string
+    label: Image
+    description: Image to be used for compute instance
+    default: "centos7-heat"
+  flavor:
+    type: string
+    label: Instance Type
+    description: Type of instance (flavor) to be used
+    default: "m1.medium"
+  network:
+    type: string
+    label: Network ID
+    description: Network ID for the server
+    default: "net-tenant-verso-rupar"  
+
+resources:
+  cloud_config_stress:
+    type: OS::Heat::CloudConfig
+    properties:
+      cloud_config:
+        runcmd:
+          - export http_proxy="http://10.102.162.12:3128"
+          - export https_proxy="https://10.102.162.12:3128"         
+          - cd /tmp/
+          - yum install -y "http://apt.sw.be/redhat/el7/en/x86_64/rpmforge/RPMS/stress-1.0.2-1.el7.rf.x86_64.rpm"
+          - stress --cpu 2 --timeout 240m &
+          - touch risultati_disco.txt
+          - while true; do dd bs=512k count=4096 if=/dev/zero of=test conv=fdatasync >> risultati.txt 2>&1; rm test; done;
+
+  asg:
+    type: OS::Heat::AutoScalingGroup
+    properties:
+      desired_capacity: 10
+      min_size: 2
+      max_size: 20
+      resource:
+        type: http://10.102.184.45/rh/nested_template_with_volume.yaml
+        properties:
+          flavor: {get_param: flavor}
+          image: {get_param: image}
+          key_name: {get_param: key}
+          network: {get_param: network}
+          metadata: {"metering.stack": {get_param: "OS::stack_id"}}
+          user_data:
+            get_resource: cloud_config_stress
+
+
+
+  scale_up_policy:
+    type: OS::Heat::ScalingPolicy
+    properties:
+      adjustment_type: change_in_capacity
+      auto_scaling_group_id: {get_resource: asg}
+      cooldown: 60
+      scaling_adjustment: 1
+  scale_down_policy:
+    type: OS::Heat::ScalingPolicy
+    properties:
+      adjustment_type: change_in_capacity
+      auto_scaling_group_id: {get_resource: asg}
+      cooldown: 60
+      scaling_adjustment: '-1'
+
+  cpu_alarm_high:
+    type: OS::Ceilometer::Alarm
+    properties:
+      description: Scale-up if the average CPU > 50% for 1 minute
+      meter_name: cpu_util
+      statistic: avg
+      period: 60
+      evaluation_periods: 1
+      threshold: 50
+      alarm_actions:
+        - {get_attr: [scale_up_policy, alarm_url]}
+      matching_metadata: {'metadata.user_metadata.stack': {get_param: "OS::stack_id"}}
+      comparison_operator: gt
+  cpu_alarm_low:
+    type: OS::Ceilometer::Alarm
+    properties:
+      description: Scale-down if the average CPU < 15% for 10 minutes
+      meter_name: cpu_util
+      statistic: avg
+      period: 60
+      evaluation_periods: 1
+      threshold: 15
+      alarm_actions:
+        - {get_attr: [scale_down_policy, alarm_url]}
+      matching_metadata: {'metadata.user_metadata.stack': {get_param: "OS::stack_id"}}
+      comparison_operator: lt
+
+outputs:
+  scale_up_url:
+    description: >
+      Webhook URL to scale up the group.
+      You can invoke the scale-up operation by doing an HTTP POST to this URL.
+    value: {get_attr: [scale_up_policy, alarm_url]}
+  scale_dn_url:
+    description: >
+      Webhook URL to scale down the group.
+      You can invoke the scale-down operation by doing an HTTP POST to this URL.
+    value: {get_attr: [scale_down_policy, alarm_url]}
+  server_list:
+    description: >
+      List of server names that are part of the group.
+    value: {get_attr: [asg, outputs_list, name]}
+

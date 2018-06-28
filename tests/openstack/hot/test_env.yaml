@@ -1,0 +1,7 @@
+{
+    "parameter_defaults":{
+        "image_id":"centos7-heat",
+        "instance_type":"m1.medium",
+        "net_id":"admin-private-net"
+    }
+}    

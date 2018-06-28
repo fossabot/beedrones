@@ -1,0 +1,14 @@
+[
+    {
+     "default": null,
+     "type": "String",
+     "name": "foo",
+     "description": null
+     },
+     {
+      "default": null,
+      "type": "String",
+      "name": "bar",
+      "description": null
+     }
+]

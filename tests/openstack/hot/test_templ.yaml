@@ -1,0 +1,27 @@
+heat_template_version: 2015-04-30
+
+description: Template di prova per istanza singola
+parameters:
+  key_name:
+    type: string
+  image_id:
+    type: string
+  instance_type:
+    type: string
+  net_id:
+    type: string
+resources:
+  my_instance:
+    type: OS::Nova::Server
+    properties:
+      key_name: { get_param: key_name }
+      image: { get_param: image_id }
+      flavor: { get_param: instance_type }
+      networks:
+        - network: { get_param: net_id }
+      user_data: { get_file : myfile }        
+
+outputs:
+  instance_ip:
+    description: The IP address of the deployed instance
+    value: { get_attr: [my_instance, first_address] }

@@ -1,0 +1,222 @@
+'''
+Created on May 11, 2013
+
+@author: io
+'''
+import urllib
+import json
+import pprint
+from hashlib import sha1
+import hmac
+import binascii
+import collections
+
+from gibbon_cloud.cloudstack.dso.base import ApiClient, ApiError
+from gibbon_cloud.cloudstack.dso.host import Host
+from gibbon_cloud.cloudstack.dso.virtual_machine import VirtualMachine
+
+class Zone(ApiClient):
+    ''' '''
+    def __init__(self, base_url, api_key, sek_key):
+        ''' '''
+        super(Zone, self).__init__(base_url, api_key, sek_key)
+        self.host = Host(base_url, api_key, sek_key)
+        self.vm = VirtualMachine(base_url, api_key, sek_key)
+
+    def info(self, zoneid):
+        ''' '''
+        params = {'command':'listZones',
+                  'response':'json',
+                  'id':zoneid}
+        response = self.send_api_request(params)
+        try:
+            res = json.loads(response)['listzonesresponse']['zone'][0]
+        except KeyError:
+            res = []
+        return res
+
+    def list(self):
+        ''' '''
+        params = {'command':'listZones',
+                  'response':'json'}
+        response = self.send_api_request(params)
+        
+        try:
+            res = []
+            data = json.loads(response)['listzonesresponse']['zone']
+            res = data
+        except KeyError:
+            res = []
+        return res
+
+    def list_pods(self, zoneid):
+        ''' '''
+        params = {'command':'listPods',
+                  'response':'json',
+                  'zoneid':zoneid}
+        response = self.send_api_request(params)
+        try:
+            res = []
+            data = json.loads(response)['listpodsresponse']['pod']
+            res = data
+        except KeyError:
+            res = []
+        return res
+
+    def list_clusters(self, zoneid, podid):
+        ''' '''
+        params = {'command':'listClusters',
+                  'response':'json',
+                  'zoneid':zoneid,
+                  'podid':podid}
+        response = self.send_api_request(params)
+        try:
+            res = []
+            data = json.loads(response)['listclustersresponse']['cluster']
+            res = data
+        except KeyError:
+            res = []
+        return res
+
+    def tree(self):
+        """Return tree composed by all main objects of a zone.
+        
+        Excpetion: ApiError
+        """
+        zones = []
+        zone_index = {}
+        pod_index = {}
+        cluster_index = {}
+        host_index = {}
+        
+        # get hosts list
+        for item in self.host.list():
+            # zone doesn't exist in zone list. Add it
+            if item['zoneid'] not in zone_index:
+                # create object
+                host = {'name':item['name'], 
+                        'id':item['id'],
+                        'vms':[]}
+                cluster = {'name':item['clustername'], 
+                           'id':item['clusterid'],
+                           'hypervisor':item['hypervisor']}
+                pod = {'name':item['podname'], 'id':item['podid']}
+                zone = {'name':item['zonename'], 'id':item['zoneid']}
+                
+                # add host to cluster
+                cluster['hosts'] = [host]
+                # add cluster to pod
+                pod['clusters'] = [cluster]                    
+                # add pod to zone
+                zone['pods'] = [pod]                    
+                # append zone to zone list
+                zones.append(zone)
+                
+                # update all the indexes
+                host_index[item['id']] = host
+                cluster_index[item['clusterid']] = cluster
+                pod_index[item['podid']] = pod
+                zone_index[item['zoneid']] = zone
+                
+            # zone exists in zone list. Update pods or clusters or hosts
+            else:
+                # pod doesn't exist in zone list. Add it
+                if item['podid'] not in pod_index:
+                    # create object
+                    host = {'name':item['name'], 
+                            'id':item['id'],
+                            'vms':[]}
+                    cluster = {'name':item['clustername'], 
+                               'id':item['clusterid'],
+                               'hypervisor':item['hypervisor']}
+                    pod = {'name':item['podname'], 'id':item['podid']}
+                    
+                    # get zone object
+                    zone = zone_index[item['zoneid']]
+                                           
+                    # add host to cluster
+                    cluster['hosts'] = [host]
+                    # add cluster to pod
+                    pod['clusters'] = [cluster]                    
+                    # add pod to zone
+                    zone['pods'].append(pod)
+                    
+                    # update all the indexes
+                    host_index[item['id']] = host
+                    cluster_index[item['clusterid']] = cluster
+                    pod_index[item['podid']] = pod
+                    
+                # zone exists in zone list. Update pods or clusters or hosts
+                else:
+                    # cluster doesn't exist in zone list. Add it
+                    if item['clusterid'] not in cluster_index:
+                        # create object
+                        host = {'name':item['name'], 
+                                'id':item['id'],
+                                'vms':[]}
+                        cluster = {'name':item['clustername'], 
+                                   'id':item['clusterid'],
+                                   'hypervisor':item['hypervisor']}
+
+                        # get pod object
+                        pod = pod_index[item['podid']]                           
+                        # get zone object
+                        zone = zone_index[item['zoneid']]
+                                               
+                        # add host to cluster
+                        cluster['hosts'] = [host]
+                        # add cluster to pod
+                        pod['clusters'].append(cluster)
+                        
+                        # update all the indexes
+                        host_index[item['id']] = host
+                        cluster_index[item['clusterid']] = cluster
+                        
+                    # cluster exists in zone list. Update pods or clusters or hosts
+                    else:
+                        # create object
+                        host = {'name':item['name'], 
+                                'id':item['id'],
+                                'vms':[]}
+
+                        # get cluster object
+                        cluster = cluster_index[item['clusterid']]  
+                        # get pod object
+                        pod = pod_index[item['podid']]                           
+                        # get zone object
+                        zone = zone_index[item['zoneid']]
+                                               
+                        # add host to cluster
+                        cluster['hosts'].append(host)
+                        
+                        # update all the indexes
+                        host_index[item['id']] = host
+        
+        # get vms list
+        for item in self.vm.list():
+            # create object
+            if 'account' in item:
+                owner = "%s/A(%s)" % (item['domain'], item['account'])
+            else:
+                owner = "%s/P(%s)" % (item['domain'], item['project'])
+            vm = {'name':item['name'],
+                  'istancename':item['instancename'],
+                  'id':item['id'],
+                  'owner':owner}
+            # get host object
+            if 'hostid' in item:
+                host = host_index[item['hostid']]
+                # add host to cluster
+                host['vms'].append(vm)
+
+        # get systemvms list
+        for item in self.vm.list_systemvm():
+            # create object
+            vm = {'name':item['name'], 'id':item['id']}
+            # get host object
+            if 'hostid' in item:
+                host = host_index[item['hostid']]
+                # add host to cluster
+                host['vms'].append(vm)
+                
+        return zones        

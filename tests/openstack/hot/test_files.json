@@ -1,0 +1,3 @@
+{
+    "myfile": "#!/bin/bash\necho \"Hello world\" > /root/testfile.txt"
+}

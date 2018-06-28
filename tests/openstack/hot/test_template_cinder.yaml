@@ -1,0 +1,58 @@
+heat_template_version: 2015-04-30
+
+description: Template Test API
+
+
+parameters:
+
+  key_name:
+    type: string
+    label: Key Name
+    description: Name of key-pair to be used for compute instance
+    default: "opstkcsi"
+ 
+  image_id:
+    type: string
+    label: Image ID
+    description: Image to be used for compute instance
+    default: "new-centos7-64bit-opstkcsi"
+
+  instance_type:
+    type: string
+    label: Instance Type
+    description: Type of instance (flavor) to be used
+    default: "m1.medium"
+
+  net_id:
+    type: string
+    label: Network ID
+    description: Network ID for the server
+    default: "admin-private-net"    
+
+
+resources:
+  my_instance:
+    type: OS::Nova::Server
+    properties:
+      key_name: { get_param: key_name }
+      image: { get_param: image_id }
+      flavor: { get_param: instance_type }
+      networks:
+        - network: { get_param: net_id }
+      block_device_mapping: [{ device_name: "vda", volume_id : { get_resource : volume1 }, delete_on_termination : "false" }]
+      user_data: |
+        #!/bin/bash -xv
+        echo "hello world\" > /root/hello-world.txt
+
+  volume1:  
+    type: OS::Cinder::Volume
+    properties:
+      name: "Server 1 - Root Disk"
+      image: { get_param: image_id }
+      size: 25   
+
+outputs:
+  instance_ip:
+    description: The IP address of the deployed instance
+    value: { get_attr: [my_instance, first_address] }
+
